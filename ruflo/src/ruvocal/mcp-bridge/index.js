@@ -653,6 +653,15 @@ async function geminiGroundedSearch(query, mode = "search") {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) return { error: "No GOOGLE_API_KEY configured for search" };
 
+  // Empty/missing query produces a 400 from Gemini's generateContent endpoint.
+  // Return a structured error so the model can recover with a real query.
+  if (!query || typeof query !== "string" || !query.trim()) {
+    return {
+      error: "search requires a non-empty query string",
+      hint: "Call this tool again with { query: 'your search terms' }. For comparisons use { action: 'compare', query: 'item A vs item B' }; for fact-checking use { action: 'fact_check', claim: 'the claim text' }.",
+    };
+  }
+
   const model = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
