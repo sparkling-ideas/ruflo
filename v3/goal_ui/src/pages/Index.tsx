@@ -38,6 +38,8 @@ import { GOAPConfigDisplay } from "@/components/GOAPConfigDisplay";
 import { GOAPPlanner, parseGoal, type Step, type DataItem } from "@/lib/goapPlanner";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { RVF_ENABLED } from "@/lib/featureFlags";
+import { getWidgetConfig, saveWidgetConfig } from "@/integrations/rvf/widgetConfigRepo";
 
 interface WidgetConfig {
   primaryColor: string;
@@ -149,6 +151,34 @@ const Index = () => {
     enableAI: true,
     aiModel: "google/gemini-2.5-flash",
   });
+  // RVF persistence for widgetConfig (Step 11 POC, ADR-093). Behind
+  // VITE_RVF_ENABLED — when off, widgetConfig is React-state-only
+  // (original behavior, resets on reload).
+  const [rvfHydrated, setRvfHydrated] = useState<boolean>(!RVF_ENABLED);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    let cancelled = false;
+    getWidgetConfig<WidgetConfig>()
+      .then((stored) => {
+        if (!cancelled && stored) setWidgetConfig(stored);
+      })
+      .catch((err) => {
+        // IndexedDB unavailable / quota / format mismatch — just fall
+        // back to in-code defaults. Log as warn so the gate's zero-error
+        // rule isn't tripped.
+        console.warn("RVF widgetConfig hydrate failed:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setRvfHydrated(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!RVF_ENABLED || !rvfHydrated) return;
+    saveWidgetConfig(widgetConfig).catch((err) => {
+      console.warn("RVF widgetConfig save failed:", err);
+    });
+  }, [widgetConfig, rvfHydrated]);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [userGoal, setUserGoal] = useState<string>("");
   const [isPlanning, setIsPlanning] = useState(false);
