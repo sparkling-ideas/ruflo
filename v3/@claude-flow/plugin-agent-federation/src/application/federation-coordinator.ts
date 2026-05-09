@@ -148,6 +148,28 @@ export class FederationCoordinator {
   ): Promise<RoutingResult> {
     this.ensureInitialized();
 
+    // ADR-097 Phase 2.b: outbound short-circuit on tripped breaker. If the
+    // peer is SUSPENDED or EVICTED we refuse the send before doing any work,
+    // and emit a constant-string error (no remaining-budget echo per the
+    // anti-oracle posture inherited from Phase 1). The check fires *before*
+    // session lookup so an evicted peer cannot consume cycles even on a
+    // dangling session reference.
+    const peer = this.discovery.getPeer(targetNodeId);
+    if (peer && !peer.isActive) {
+      const reason = peer.isEvicted ? 'PEER_EVICTED' : 'PEER_SUSPENDED';
+      await this.audit.log('message_rejected', {
+        targetNodeId,
+        metadata: { reason },
+      });
+      return {
+        success: false,
+        mode: 'direct',
+        envelopeId: '',
+        targetNodeIds: [targetNodeId],
+        error: reason,
+      };
+    }
+
     const session = this.findSessionByNodeId(targetNodeId);
     if (!session) {
       return {

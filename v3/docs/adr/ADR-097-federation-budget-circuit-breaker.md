@@ -130,13 +130,13 @@ Test surface:
 
 ## Implementation status (2026-05-09)
 
-Phases 1 and 3 (consumer-side) are landed on `main`. Phase 2 entity layer (state machine on `FederationNode`) lands on `feat/adr-100-promote-097-phase2`. Phase 2 breaker service (cost-tracker → `suspend()` wiring) and Phase 4 (`federation_breaker_status` MCP tool + doctor) remain deferred.
+Phases 1, 2.a, 2.b, and 3 (consumer-side) are landed. The breaker is functionally complete end-to-end: budget envelopes flow on every send (Phase 1), the entity carries lifecycle state (Phase 2.a), the breaker service evaluates per-peer telemetry and trips/recovers the state (Phase 2.b), and the cost-tracker consumer aggregates federated spend (Phase 3). Phase 3 upstream (`federation_spend` event emission) and Phase 4 (`federation_breaker_status` MCP tool + doctor surface) remain deferred — the entity API for both is in place; only the wire-up is missing.
 
 | Phase / Component | Status | Files | Commit(s) |
 |---|---|---|---|
 | **Phase 1** — Budget envelope + hop counter on `federation_send` | Implemented | `v3/@claude-flow/plugin-agent-federation/src/domain/value-objects/federation-budget.ts` (new), `mcp-tools.ts` updated | `7e1cc06df feat(federation): ADR-097 Phase 1 — budget envelope + hop counter (#1723)` |
 | **Phase 2.a** — Peer state machine value object + entity transitions | Implemented | `domain/value-objects/federation-node-state.ts` (new), `domain/entities/federation-node.ts` (state field + suspend/evict/reactivate), `__tests__/unit/federation-node-state.test.ts` (27 tests) | `feat/adr-100-promote-097-phase2` |
-| **Phase 2.b** — Breaker service: cost-tracker → `suspend()` wiring + outbound short-circuit | Deferred | `application/breaker-service.ts` (planned), `routing-service.ts` (gate on `isActive`) | — |
+| **Phase 2.b** — Breaker service + outbound short-circuit | Implemented | `application/federation-breaker-service.ts` (new — pure `evaluatePolicy` + stateful `FederationBreakerService` with bounded per-peer buffer), `application/federation-coordinator.ts` (sendMessage gates on `!peer.isActive` with `PEER_SUSPENDED`/`PEER_EVICTED` constant errors), `__tests__/unit/federation-breaker-service.test.ts` (25 tests) | `feat/adr-100-promote-097-phase2` |
 | **Phase 3** — Cost-tracker bus event + per-peer rolling aggregation | Consumer-side implemented; upstream emitter deferred | `plugins/ruflo-cost-tracker/scripts/federation.mjs`, `skills/cost-federation/SKILL.md` | `1c0804315 feat(cost-tracker): P6 — ADR-097 Phase 3 federation_spend consumer (v0.14.0)` |
 | **Phase 3 plugin wiring** — federation plugin adopts budget integration + ADR-097 doc | Implemented | `plugins/ruflo-federation/` (v0.2.0), `docs/adrs/0001-federation-contract.md` | `b0168e4a5 feat(ruflo-federation): adopt plugin contract — 3-gate alignment + ADR-097 budget integration + smoke` |
 | **Phase 4** — Doctor + `federation_breaker_status` MCP tool | Deferred | — | — |
@@ -150,9 +150,8 @@ Phases 1 and 3 (consumer-side) are landed on `main`. Phase 2 entity layer (state
 
 ### Deferred
 
-- **Phase 2.b** — Breaker service that reads cost-tracker telemetry, evaluates thresholds (24h cost > `peer.costSuspensionUsd` default $5; 1h failure ratio > 50% across ≥10 sends), and calls `node.suspend()`. Outbound short-circuit on `!node.isActive` in `federation_send`. Cooldown/auto-evict tickers are pure functions (`isCooldownElapsed`, `shouldAutoEvict`) already shipped in Phase 2.a — the breaker just wires them.
-- **Phase 4** — `federation_breaker_status` MCP tool; `ruflo doctor` peer-state output. Now unblocked by Phase 2.a (entity exposes `state` + `stateRecord`).
-- **Phase 3 upstream** — `federation_spend` event emission from `federation_send` completion. Consumer side is wired and waiting.
+- **Phase 4** — `federation_breaker_status` MCP tool surfacing `breakerService.snapshot(nodeId)` per peer; `ruflo doctor` peer-state output reading the same snapshot + `node.stateRecord`. Both backed by APIs that are now in place — the work is purely the MCP tool definition + doctor formatter.
+- **Phase 3 upstream** — `federation_spend` event emission from `federation_send` completion. The breaker currently maintains its own in-memory rolling buffer (`FederationBreakerService.recordOutcome`); when this lands, the cost-tracker bus subscriber can call `recordOutcome` from the bus subscriber and the in-memory buffer becomes a transparent cache. No breaker code changes required.
 
 ---
 
