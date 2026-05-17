@@ -1,0 +1,32 @@
+name: Check fork drift
+
+# Per ADR-0002 (in fork-restart meta-repo): every A0 same-version republish is recorded
+# in FORK-PATCHES.md. This workflow runs daily, comparing each patched version to upstream's
+# current `latest`. Drift = "upstream has moved past our patch" = decision needed.
+
+on:
+  schedule:
+    - cron: '15 9 * * *'  # Daily at 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run drift detector
+        id: drift
+        run: bash scripts/check-fork-drift.sh
+
+      # Optional: open or update a tracking issue when drift is detected.
+      # Uncomment once we have an active patch in FORK-PATCHES.md and want
+      # automated alerting beyond the workflow's red checkmark.
+      #
+      # - name: File / update drift-tracking issue
+      #   if: failure() && steps.drift.outcome == 'failure'
+      #   uses: peter-evans/create-or-update-issue@v6
+      #   with:
+      #     title: "Fork drift detected — review FORK-PATCHES.md"
+      #     body: "The drift detector found one or more patches where upstream has bumped past our version. See the workflow run for details, then decide re-patch / drop / no-action per ADR-0002."
+      #     labels: "fork-drift,maintenance"
